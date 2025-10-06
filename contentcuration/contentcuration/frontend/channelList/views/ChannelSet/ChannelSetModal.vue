@@ -199,7 +199,6 @@
   import { set } from 'vue';
   import { mapGetters, mapActions } from 'vuex';
   import difference from 'lodash/difference';
-  import KModal from 'kolibri-design-system/lib/KModal';
   import { RouteNames } from '../../constants';
   import ChannelItem from './ChannelItem';
   import ChannelSelectionList from './ChannelSelectionList';
@@ -217,7 +216,6 @@
       ChannelSelectionList,
       ChannelItem,
       FullscreenModal,
-      KModal,
       Tabs,
       LoadingText,
     },
@@ -422,7 +420,6 @@
         }
       },
       confirmCancel() {
-        this.showUnsavedDialog = false;
         if (this.isNew) {
           if (this.channelSet && this.channelSet.id) {
             return this.deleteChannelSet(this.channelSet).then(this.close);
