@@ -1,201 +1,231 @@
-import { mount } from '@vue/test-utils';
-import { factory } from '../../../store';
-import router from '../../../router';
+import { render, screen, fireEvent } from '@testing-library/vue';
+import VueRouter from 'vue-router';
+import { Store } from 'vuex';
+import StudioCatalogList from '../StudioCatalogList';
 import { RouteNames } from '../../../constants';
-import CatalogList from '../CatalogList';
 
-const store = factory();
+const mockChannels = [
+  {
+    id: 'channel-1',
+    name: 'Testing Channel 1',
+    description: 'First test channel',
+    thumbnail: null,
+    thumbnail_encoding: {},
+    language: 'en',
+    public: false,
+    version: 0,
+    last_published: null,
+    deleted: false,
+    source_url: 'https://example.com',
+    demo_server_url: 'https://demo.com',
+    edit: true,
+    view: true,
+    modified: '2025-12-19T10:00:00Z',
+    primary_token: null,
+    count: 10,
+    unpublished_changes: true,
+    thumbnail_url: null,
+    published: false,
+    publishing: false,
+    bookmark: false,
+  },
+  {
+    id: 'channel-2',
+    name: 'Testing Channel 2',
+    description: 'Second test channel',
+    thumbnail: null,
+    thumbnail_encoding: {},
+    language: 'es',
+    public: false,
+    version: 0,
+    last_published: null,
+    deleted: false,
+    source_url: 'https://example.com',
+    demo_server_url: 'https://demo.com',
+    edit: true,
+    view: true,
+    modified: '2025-12-19T10:00:00Z',
+    primary_token: null,
+    count: 20,
+    unpublished_changes: false,
+    thumbnail_url: null,
+    published: true,
+    publishing: false,
+    bookmark: false,
+  },
+];
+
+const router = new VueRouter({
+  routes: [
+    { name: RouteNames.CATALOG_ITEMS, path: '/catalog' },
+    { name: RouteNames.CATALOG_DETAILS, path: '/catalog/:channelId/details' },
+    { name: 'CHANNEL_EDIT', path: '/:channelId/:tab' },
+  ],
+});
 
 router.push({ name: RouteNames.CATALOG_ITEMS });
 
-const results = ['channel-1', 'channel-2'];
+function renderComponent(customStore = null) {
+  const searchCatalog = jest.fn().mockResolvedValue();
 
-function makeWrapper(computed = {}) {
-  const loadCatalog = jest.spyOn(CatalogList.methods, 'loadCatalog');
-  loadCatalog.mockImplementation(() => Promise.resolve());
-
-  const downloadCSV = jest.spyOn(CatalogList.methods, 'downloadCSV');
-  const downloadPDF = jest.spyOn(CatalogList.methods, 'downloadPDF');
-
-  const wrapper = mount(CatalogList, {
-    router,
-    store,
-    computed: {
-      page() {
-        return {
-          count: results.length,
-          results,
-        };
+  const store =
+    customStore ||
+    new Store({
+      modules: {
+        channel: {
+          namespaced: true,
+          getters: {
+            getChannels: () => ids => {
+              return ids.map(id => mockChannels.find(c => c.id === id)).filter(Boolean);
+            },
+          },
+          actions: {
+            deleteChannel: jest.fn(),
+            removeViewer: jest.fn(),
+          },
+        },
+        channelList: {
+          namespaced: true,
+          state: {
+            page: {
+              count: mockChannels.length,
+              results: mockChannels.map(c => c.id),
+              page_number: 1,
+              total_pages: 1,
+            },
+          },
+          actions: {
+            searchCatalog,
+          },
+        },
       },
-      ...computed,
-    },
+      state: {
+        connection: {
+          online: true,
+        },
+        session: {
+          currentUser: {
+            id: 'user-1',
+          },
+        },
+      },
+      actions: {
+        showSnackbar: jest.fn(),
+        showSnackbarSimple: jest.fn(),
+      },
+    });
+
+  return render(StudioCatalogList, {
+    store,
+    routes: router,
     stubs: {
-      CatalogFilters: true,
+      CatalogFilters: {
+        template: '<div data-testid="catalog-filters">Filters</div>',
+      },
+      Pagination: {
+        template: '<div data-testid="pagination">Pagination</div>',
+        props: ['pageNumber', 'totalPages'],
+      },
     },
   });
-  return [wrapper, { loadCatalog, downloadCSV, downloadPDF }];
 }
 
-describe('catalogFilterBar', () => {
-  let wrapper, mocks;
-
-  beforeEach(async () => {
-    [wrapper, mocks] = makeWrapper();
-    await wrapper.setData({ loading: false });
+describe('StudioCatalogList', () => {
+  it('renders catalog channels', async () => {
+    renderComponent();
+    const cards = await screen.findAllByTestId('card');
+    expect(cards.length).toBe(2);
   });
 
-  it('should call loadCatalog on mount', () => {
-    [wrapper, mocks] = makeWrapper();
-    expect(mocks.loadCatalog).toHaveBeenCalled();
+  it('shows results count', async () => {
+    renderComponent();
+    expect(await screen.findByText(/2 results found/i)).toBeInTheDocument();
   });
 
-  describe('on query change', () => {
-    const searchCatalogMock = jest.fn();
-
-    beforeEach(() => {
-      router.replace({ query: {} }).catch(() => {});
-      searchCatalogMock.mockReset();
-      [wrapper, mocks] = makeWrapper({
-        debouncedSearch() {
-          return searchCatalogMock;
-        },
-      });
-    });
-
-    it('should call debouncedSearch', async () => {
-      const keywords = 'search catalog test';
-      router.push({ query: { keywords } }).catch(() => {});
-      await wrapper.vm.$nextTick();
-      expect(searchCatalogMock).toHaveBeenCalled();
-    });
-
-    it('should reset excluded if a filter changed', async () => {
-      const keywords = 'search reset test';
-      await wrapper.setData({ excluded: ['item 1'] });
-      router.push({ query: { keywords } }).catch(() => {});
-      await wrapper.vm.$nextTick();
-      expect(wrapper.vm.excluded).toEqual([]);
-    });
-
-    it('should keep excluded if page number changed', async () => {
-      await wrapper.setData({ excluded: ['item 1'] });
-      router
-        .push({
-          query: {
-            ...wrapper.vm.$route.query,
-            page: 2,
+  it('shows empty state when no channels found', async () => {
+    const emptyStore = new Store({
+      modules: {
+        channel: {
+          namespaced: true,
+          getters: {
+            getChannels: () => () => [],
           },
-        })
-        .catch(() => {});
-      await wrapper.vm.$nextTick();
-      expect(wrapper.vm.excluded).toEqual(['item 1']);
+          actions: {
+            deleteChannel: jest.fn(),
+            removeViewer: jest.fn(),
+          },
+        },
+        channelList: {
+          namespaced: true,
+          state: {
+            page: {
+              count: 0,
+              results: [],
+              page_number: 1,
+              total_pages: 0,
+            },
+          },
+          actions: {
+            searchCatalog: jest.fn().mockResolvedValue(),
+          },
+        },
+      },
+      state: {
+        connection: {
+          online: true,
+        },
+        session: {
+          currentUser: {
+            id: 'user-1',
+          },
+        },
+      },
+      actions: {
+        showSnackbar: jest.fn(),
+        showSnackbarSimple: jest.fn(),
+      },
     });
+
+    renderComponent(emptyStore);
+    const cards = screen.queryAllByTestId('card');
+    expect(cards.length).toBe(0);
+    expect(await screen.findByText(/0 results found/i)).toBeInTheDocument();
   });
 
-  describe('download workflow', () => {
-    describe('toggling selection mode', () => {
-      it('checkboxes and toolbar should be hidden if selecting is false', () => {
-        expect(wrapper.findComponent('[data-test="checkbox"]').exists()).toBe(false);
-        expect(wrapper.findComponent('[data-test="toolbar"]').exists()).toBe(false);
-      });
+  describe('selection mode', () => {
+    it('shows select all checkbox when entering selection mode', async () => {
+      renderComponent();
 
-      it('should activate when select button is clicked', async () => {
-        await wrapper.findComponent('[data-test="select"]').trigger('click');
-        expect(wrapper.vm.selecting).toBe(true);
-      });
+      // Initially no select-all checkbox
+      expect(screen.queryByLabelText(/select all/i)).not.toBeInTheDocument();
 
-      it('clicking cancel should exit selection mode', async () => {
-        await wrapper.setData({ selecting: true });
-        await wrapper.findComponent('[data-test="cancel"]').trigger('click');
-        expect(wrapper.vm.selecting).toBe(false);
-      });
+      // Click select button
+      const selectButton = await screen.findByText(/download a summary of selected channels/i);
+      await fireEvent.click(selectButton);
 
-      it('excluded should reset when selection mode is exited', async () => {
-        await wrapper.setData({ selecting: true, excluded: ['item-1', 'item-2'] });
-        wrapper.vm.setSelection(false);
-        expect(wrapper.vm.excluded).toHaveLength(0);
-      });
+      // Select-all checkbox should appear
+      expect(await screen.findByLabelText(/select all/i)).toBeInTheDocument();
+
+      // Toolbar with count should appear
+      expect(await screen.findByText(/2 channels selected/i)).toBeInTheDocument();
     });
 
-    describe('selecting channels', () => {
-      const excluded = ['item-1'];
+    it('exits selection mode when cancel is clicked', async () => {
+      renderComponent();
 
-      beforeEach(async () => {
-        await wrapper.setData({
-          selecting: true,
-          excluded,
-        });
-      });
+      // Enter selection mode
+      const selectButton = await screen.findByText(/download a summary of selected channels/i);
+      await fireEvent.click(selectButton);
 
-      it('selecting all should select all items on the page', async () => {
-        await wrapper.setData({ excluded: excluded.concat(results) });
-        wrapper.vm.selectAll = true;
-        expect(wrapper.vm.excluded).toEqual(excluded);
-        expect(wrapper.vm.selected).toEqual(results);
-      });
+      // Verify we're in selection mode
+      expect(await screen.findByLabelText(/select all/i)).toBeInTheDocument();
 
-      it('deselecting all should select all items on the page', () => {
-        wrapper.vm.selectAll = false;
-        expect(wrapper.vm.excluded).toEqual(excluded.concat(results));
-        expect(wrapper.vm.selected).toEqual([]);
-      });
+      // Click cancel
+      const cancelButton = await screen.findByText(/cancel/i);
+      await fireEvent.click(cancelButton);
 
-      it('selecting a channel should remove it from excluded', async () => {
-        await wrapper.setData({ excluded: excluded.concat(results) });
-        wrapper.vm.selected = [results[0]];
-        expect(wrapper.vm.excluded).toEqual(excluded.concat([results[1]]));
-        expect(wrapper.vm.selected).toEqual([results[0]]);
-      });
-
-      it('deselecting a channel should add it to excluded', () => {
-        wrapper.vm.selected = [results[0]];
-        expect(wrapper.vm.excluded).toEqual(excluded.concat([results[1]]));
-        expect(wrapper.vm.selected).toEqual([results[0]]);
-      });
-    });
-
-    describe('download csv', () => {
-      let downloadChannelsCSV;
-      const excluded = ['item-1', 'item-2'];
-
-      beforeEach(async () => {
-        await wrapper.setData({ selecting: true, excluded });
-        downloadChannelsCSV = jest.spyOn(wrapper.vm, 'downloadChannelsCSV');
-        downloadChannelsCSV.mockImplementation(() => Promise.resolve());
-      });
-
-      it('clicking download CSV should call downloadCSV', async () => {
-        mocks.downloadCSV.mockImplementationOnce(() => Promise.resolve());
-        await wrapper.findComponent('[data-test="download-button"]').trigger('click');
-        const menuOptions = wrapper.findAll('.ui-menu-option-content');
-        await menuOptions.at(1).trigger('click');
-        expect(mocks.downloadCSV).toHaveBeenCalled();
-      });
-
-      it('clicking download PDF should call downloadPDF', async () => {
-        mocks.downloadPDF.mockImplementationOnce(() => Promise.resolve());
-        await wrapper.findComponent('[data-test="download-button"]').trigger('click');
-        const menuOptions = wrapper.findAll('.ui-menu-option-content');
-        await menuOptions.at(0).trigger('click');
-        expect(mocks.downloadPDF).toHaveBeenCalled();
-      });
-
-      it('downloadCSV should call downloadChannelsCSV with current parameters', async () => {
-        const keywords = 'Download csv keywords test';
-        router.replace({ query: { keywords } });
-        await wrapper.vm.downloadCSV();
-        expect(downloadChannelsCSV.mock.calls[0][0].keywords).toBe(keywords);
-      });
-
-      it('downloadCSV should call downloadChannelsCSV with list of excluded items', async () => {
-        await wrapper.vm.downloadCSV();
-        expect(downloadChannelsCSV.mock.calls[0][0].excluded).toEqual(excluded);
-      });
-
-      it('downloadCSV should exit selection mode', async () => {
-        await wrapper.vm.downloadCSV();
-        expect(wrapper.vm.selecting).toBe(false);
-      });
+      // Selection UI should disappear
+      expect(screen.queryByLabelText(/select all/i)).not.toBeInTheDocument();
     });
   });
 });
